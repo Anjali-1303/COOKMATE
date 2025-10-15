@@ -1,159 +1,161 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>CookMate - AI Voice Cooking Assistant</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CookMate – AI Voice Chef</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <!-- LOGIN MODAL -->
-  <div id="authOverlay" class="overlay hidden">
-    <div id="authModal" class="modal">
-      <span class="closeBtn">&times;</span>
-      <div class="auth-logo">
-        <img src="{{ url_for('static', filename='images/cookmate_logo.png') }}" alt="CookMate" />
-        <h2>Welcome to CookMate</h2>
-      </div>
-      <div class="auth-tabs">
-        <button class="auth-tab active" data-tab="login">Login</button>
-        <button class="auth-tab" data-tab="register">Register</button>
-      </div>
-      <form id="authForm">
-        <div class="auth-error hidden"></div>
-        <div class="input-group">
-          <label for="authEmail">Email</label>
-          <input type="email" id="authEmail" placeholder="your.email@example.com" required />
-        </div>
-        <div class="input-group">
-          <label for="authPassword">Password</label>
-          <input type="password" id="authPassword" placeholder="••••••••" required />
-        </div>
-        <button type="submit" class="btn primary full-width" id="authSubmit">Login</button>
-      </form>
-    </div>
-  </div>
-
   <div class="container">
-    <!-- HEADER -->
-    <header class="logo-bar">
-      <div class="logo">
-        <img src="{{ url_for('static', filename='images/cookmate_logo.png') }}" alt="logo" />
-        <div>
-          <div style="font-size:18px">CookMate</div>
-          <div style="font-size:12px;opacity:.9">AI Voice Cooking Assistant</div>
+    <!-- Auth Modal -->
+    <div class="overlay hidden" id="authOverlay">
+      <div class="modal">
+        <button class="closeBtn">&times;</button>
+        <div class="auth-logo">
+          <h2>🍳 CookMate</h2>
         </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px">
-        <nav class="nav">
-          <a href="#" class="nav-link active" data-route="home">Home</a>
-          <a href="#" class="nav-link" data-route="recipes">Recipes</a>
-          <a href="#" class="nav-link" data-route="pantry">My Pantry</a>
-          <a href="#" class="nav-link" data-route="feedback">Feedback</a>
-          <a href="#" class="nav-link" data-route="admin">Admin</a>
-          <a href="#" class="nav-link" data-route="profile">Profile</a>
-        </nav>
-        <div class="search-voice">
-          <input id="globalSearch" type="search" placeholder="Search recipes..." />
-          <button id="voiceBtn" title="Voice search">🎙️</button>
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Login</button>
+          <button class="auth-tab" data-tab="register">Register</button>
         </div>
+        <form id="authForm">
+          <div class="input-group">
+            <label for="authEmail">Email</label>
+            <input type="email" id="authEmail" placeholder="your@email.com" required>
+          </div>
+          <div class="input-group">
+            <label for="authPassword">Password</label>
+            <input type="password" id="authPassword" placeholder="••••••••" required>
+          </div>
+          <div class="auth-error hidden">⚠️ Error message</div>
+          <button type="submit" class="btn primary full-width" id="authSubmit">Login</button>
+        </form>
       </div>
-    </header>
+    </div>
 
-    <!-- MAIN -->
+    <!-- Header -->
+    <div class="logo-bar">
+      <div class="logo">
+        <span style="font-size:32px;">🍳</span>
+        <span style="font-size:20px;">CookMate</span>
+      </div>
+      <div class="search-voice">
+        <input type="search" id="globalSearch" placeholder="Search recipes...">
+        <button id="voiceBtn">🎙️</button>
+      </div>
+    </div>
+
     <div class="main">
-      <!-- SIDEBAR -->
+      <!-- Sidebar -->
       <aside class="sidebar">
-        <div class="side-title">Explore</div>
-        <nav class="side-list">
-          <button class="side-btn active" data-route="home"><span class="icon">🏠</span> Home</button>
-          <button class="side-btn" data-route="recipes"><span class="icon">🍽</span> Recipes</button>
-          <button class="side-btn" data-route="pantry"><span class="icon">🥫</span> My Pantry</button>
-          <button class="side-btn" data-route="feedback"><span class="icon">💬</span> Feedback</button>
-          <button class="side-btn" data-route="admin"><span class="icon">⚙️</span> Admin</button>
-          <button class="side-btn" data-route="profile"><span class="icon">👤</span> Profile</button>
-        </nav>
+        <div class="side-title">Navigation</div>
+        <div class="side-list">
+          <button class="side-btn" data-route="home">
+            <span class="icon">🏠</span>
+            <span>Home</span>
+          </button>
+          <button class="side-btn" data-route="recipes">
+            <span class="icon">📚</span>
+            <span>All Recipes</span>
+          </button>
+          <button class="side-btn" data-route="pantry">
+            <span class="icon">🥫</span>
+            <span>My Pantry</span>
+          </button>
+          <button class="side-btn" data-route="profile">
+            <span class="icon">👤</span>
+            <span>Profile</span>
+          </button>
+          <button class="side-btn" data-route="feedback">
+            <span class="icon">💬</span>
+            <span>Feedback</span>
+          </button>
+        </div>
       </aside>
 
-      <!-- CONTENT -->
-      <main class="content">
-        <!-- HOME -->
-        <section id="home" class="view active">
+      <!-- Content -->
+      <div class="content">
+        <!-- Home View -->
+        <div class="view active" id="home">
           <div class="card hero">
             <div class="hero-left">
-              <div class="hero-title">CookMate – your AI voice chef</div>
-              <div class="hero-sub">Get step-by-step voice-guided recipes, pantry-driven suggestions, and smart ingredient substitutions.</div>
-              <div style="margin-top:14px" class="row">
-                <button class="btn" data-route="recipes">Find Recipes</button>
-                <button class="btn alt" data-route="pantry">Open Pantry</button>
-              </div>
-              <small class="muted">💡 Tip: Click the 🎙️ button to search recipes with your voice!</small>
+              <h1 class="hero-title">🍳 CookMate – your AI voice chef</h1>
+              <p class="hero-sub">Get step-by-step voice-guided recipes, pantry-driven suggestions, and smart ingredient substitutions.</p>
             </div>
           </div>
           <div class="card">
             <h3>Featured Recipes</h3>
-            <div id="featuredGrid" class="grid">
-              <div style="padding:20px;text-align:center;color:#9ca3af">Loading recipes...</div>
+            <div class="grid" id="featuredGrid">
+              <p class="muted">Loading recipes...</p>
             </div>
           </div>
-        </section>
+        </div>
 
-        <!-- RECIPES -->
-        <section id="recipes" class="view">
+        <!-- All Recipes View -->
+        <div class="view" id="recipes">
           <div class="card">
             <h3>All Recipes</h3>
-            <div id="recipesGrid" class="grid"></div>
-            <div id="recipeDetailArea"></div>
+            <div id="recipesList">
+              <p class="muted">Loading recipes...</p>
+            </div>
           </div>
-        </section>
+        </div>
 
-        <!-- PANTRY -->
-        <section id="pantry" class="view">
+        <!-- Recipe Detail View -->
+        <div class="view" id="recipe-detail">
+          <div id="recipeDetail">
+            <p class="muted">Loading recipe details...</p>
+          </div>
+        </div>
+
+        <!-- Pantry View -->
+        <div class="view" id="pantry">
           <div class="card">
             <h3>My Pantry</h3>
-            <div class="row">
-              <input id="pantryInput" placeholder="e.g., tomato" />
-              <input id="pantryExpiry" type="number" value="7" placeholder="Expiry (days)" />
-              <button class="btn" id="addPantryBtn">Add</button>
+            <div class="row" style="margin-bottom:16px;">
+              <input type="text" id="pantryInput" placeholder="Item name">
+              <input type="number" id="pantryExpiry" placeholder="Days" value="7" min="1" style="max-width:100px;">
+              <button class="btn" id="addPantryBtn">Add Item</button>
             </div>
-            <div id="pantryGrid" class="pantry-list"></div>
+            <div id="pantryList"></div>
           </div>
-        </section>
+        </div>
 
-        <!-- FEEDBACK -->
-        <section id="feedback" class="view">
+        <!-- Feedback View -->
+        <div class="view" id="feedback">
           <div class="card">
             <h3>Cooking Feedback</h3>
-            <textarea id="fbText" rows="3" placeholder="Share your feedback..."></textarea>
-            <button class="btn" id="submitFb">Submit</button>
+            <p class="muted">Share your experience or suggest improvements</p>
+            <textarea id="fbText" placeholder="Your feedback..."></textarea>
+            <button class="btn" id="submitFb" style="margin-top:12px;">Submit Feedback</button>
           </div>
-        </section>
+        </div>
 
-        <!-- ADMIN -->
-        <section id="admin" class="view">
+        <!-- Admin View -->
+        <div class="view" id="admin">
           <div class="card">
             <h3>Admin Dashboard</h3>
             <div id="adminStats">
-              <small class="muted">Loading stats...</small>
+              <p class="muted">Loading stats...</p>
             </div>
           </div>
-        </section>
+        </div>
 
-        <!-- PROFILE -->
-        <section id="profile" class="view">
+        <!-- Profile View -->
+        <div class="view" id="profile">
           <div class="card">
             <h3>User Profile</h3>
-            <p>Name: <span id="profileName">Guest</span></p>
-            <p>Email: <span id="profileEmail">guest@example.com</span></p>
-            <button class="btn logout-btn" id="logoutBtn">Logout</button>
+            <div id="profileInfo">
+              <p class="muted">Name: Guest</p>
+              <p class="muted">Email: guest@example.com</p>
+            </div>
           </div>
-        </section>
-      </main>
+        </div>
+      </div>
     </div>
-
-    <footer>CookMate © 2025 - AI Voice Cooking Assistant</footer>
   </div>
 
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
