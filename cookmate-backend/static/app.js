@@ -1,435 +1,423 @@
-/***** STATE *****/
-let state = {
-  route: 'home',
-  selectedRecipe: null,
-  pantry: [],
-  favorites: [],
-  feedbacks: [],
-  activity: [],
-  prefs: {},
+// ============================
+// CookMate - Full app.js Fixed
+// ============================
+
+// ---------------------------
+// STATE
+// ---------------------------
+const state = {
+  currentView: 'home',
   currentUser: null,
-  recipes: []
+  recipes: [],
+  allRecipes: [],
+  selectedRecipe: null,
+  pendingRoute: null
 };
 
-const API = ''; // Flask backend served from same origin
+const API = 'http://localhost:5000';
+let currentUtterance = null;
 
-/***** VOICE FUNCTIONALITY *****/
-let recognition;
-let synthesis = window.speechSynthesis;
+// ---------------------------
+// DOM Helpers
+// ---------------------------
+const qs = (s, el = document) => el.querySelector(s);
+const qsa = (s, el = document) => Array.from(el.querySelectorAll(s));
+const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
 
-if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.lang = 'en-US';
-
-  recognition.onstart = () => {
-    console.log('Voice recognition started');
-    document.getElementById('voiceBtn').style.background = '#10b981';
-    document.getElementById('voiceAnim').style.animation = 'voice 300ms linear infinite alternate';
-  };
-
-  recognition.onresult = async (event) => {
-    const transcript = event.results[0][0].transcript;
-    console.log('Heard:', transcript);
-
-    try {
-      const res = await fetch(`${API}/api/voice`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: transcript })
-      });
-      const data = await res.json();
-      speakText(data.response || 'Sorry, I did not understand that.');
-    } catch (err) {
-      console.error('Voice API error:', err);
-      speakText('Sorry, there was an error processing your request.');
-    }
-  };
-
-  recognition.onerror = (event) => {
-    console.error('Speech recognition error:', event.error);
-    document.getElementById('voiceBtn').style.background = '';
-  };
-
-  recognition.onend = () => {
-    console.log('Voice recognition ended');
-    document.getElementById('voiceBtn').style.background = '';
-    document.getElementById('voiceAnim').style.animation = 'voice 1000ms linear infinite alternate';
-  };
+// ---------------------------
+// UTILS
+// ---------------------------
+function escapeHtml(s) {
+  if (!s && s !== 0) return '';
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#039;');
 }
 
-function startVoiceRecognition() {
-  if (recognition) recognition.start();
-  else alert('Speech recognition not supported in your browser. Use Chrome/Edge.');
+function getRecipeImageUrl(recipe) {
+  if (!recipe) return `${API}/static/images/default-recipe.jpg`;
+  if (!recipe.img) {
+    const name = (recipe.title || recipe.name || 'default-recipe').toLowerCase().replace(/ /g, '_');
+    return `${API}/static/images/${name}.jpg`;
+  }
+  return recipe.img.startsWith('/') ? `${API}${recipe.img}` : `${API}/static/images/${recipe.img}`;
 }
 
-function speakText(text) {
-  if (!synthesis) return;
-  synthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.rate = parseFloat(document.getElementById('prefVoiceRate')?.value || 0.95);
-  utter.pitch = 1;
-  utter.volume = 1;
-  synthesis.speak(utter);
+function setActiveNav(route) {
+  qsa('.side-btn, .nav-link').forEach(el => el.classList.toggle('active', el.dataset.route === route));
 }
 
-/***** ROUTING UI *****/
-const views = document.querySelectorAll('.view');
-function showView(name) {
-  state.route = name;
-  views.forEach(v => v.style.display = 'none');
-  const el = document.getElementById('view-' + name);
-  if (el) el.style.display = 'block';
-  document.querySelectorAll('[data-route]').forEach(b => b.classList.toggle('active', b.dataset.route === name));
-  renderAll();
-}
+// ---------------------------
+// INITIALIZATION
+// ---------------------------
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log('CookMate client starting...');
+  initUIBindings();
+  setupAuth();
+  setupVoiceRecognition();
+  setupSearch();
+  setupLogoutBinding();
+  await fetchRecipes();
 
-document.querySelectorAll('[data-route]').forEach(btn => {
-  btn.addEventListener('click', e => {
-    e.preventDefault();
-    showView(btn.dataset.route);
+  const path = window.location.pathname.slice(1) || 'home';
+  const validViews = ['home','recipes','recipe-detail','pantry','profile','feedback','admin'];
+  const route = validViews.includes(path) ? path : 'home';
+  navigateToRoute(route);
+
+  window.addEventListener('popstate', () => {
+    const route = window.location.pathname.slice(1) || 'home';
+    navigateToRoute(route);
   });
 });
 
-/***** FETCH RECIPES *****/
+// ---------------------------
+// UI BINDINGS
+// ---------------------------
+function initUIBindings() {
+  document.addEventListener('click', (e) => {
+    const navItem = e.target.closest('[data-route]');
+    if (navItem) {
+      e.preventDefault();
+      navigateToRoute(navItem.dataset.route);
+      return;
+    }
+
+    const card = e.target.closest('.recipe-card');
+    if (card) {
+      const id = card.dataset.id;
+      const recipe = state.recipes.find(r => r.id === id);
+      if (recipe) {
+        state.selectedRecipe = recipe;
+        navigateToRoute('recipe-detail');
+        renderRecipeDetail(recipe);
+      }
+    }
+
+    if (e.target.matches('.pantry-delete')) {
+      deletePantryItem(e.target.dataset.id);
+    }
+  });
+
+  on(qs('#addPantryBtn'), 'click', () => {
+    const name = qs('#pantryInput')?.value?.trim();
+    const expiry = qs('#pantryExpiry')?.value || 7;
+    if (!name) return alert('Enter item name');
+    if (!state.currentUser) {
+      state.pendingRoute = 'pantry';
+      showAuthModal();
+      return;
+    }
+    addPantryItem(name, expiry);
+    qs('#pantryInput').value = '';
+  });
+
+  on(qs('#submitFb'), 'click', async () => {
+    const text = qs('#fbText')?.value?.trim();
+    if (!text) return alert('Enter feedback');
+    try {
+      await fetch(`${API}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: state.currentUser?.email || 'guest', text })
+      });
+      alert('Thanks. Feedback submitted.');
+      if (qs('#fbText')) qs('#fbText').value = '';
+    } catch (err) {
+      console.error(err);
+      alert('Failed to submit feedback');
+    }
+  });
+}
+
+// ---------------------------
+// ROUTING
+// ---------------------------
+function navigateToRoute(route) {
+  if (!route) route = 'home';
+  const view = qs(`#${route}`);
+  if (!view) return console.warn('Route not found:', route);
+
+  const protectedRoutes = ['pantry', 'profile', 'feedback', 'admin'];
+  if (protectedRoutes.includes(route) && !state.currentUser) {
+    state.pendingRoute = route;
+    showAuthModal();
+    return;
+  }
+  if (route === 'admin' && !state.currentUser?.isAdmin) {
+    alert('Access denied — admin only');
+    route = 'home';
+  }
+
+  try { window.history.pushState({}, '', `/${route}`); } catch {}
+
+  qsa('.view').forEach(v => { v.classList.remove('active'); v.style.display = 'none'; });
+  view.classList.add('active');
+  view.style.display = 'block';
+  setActiveNav(route);
+
+  renderContent(route);
+  state.currentView = route;
+  window.scrollTo(0, 0);
+}
+
+// ---------------------------
+// RENDERING
+// ---------------------------
+function renderContent(route) {
+  switch (route) {
+    case 'home': renderFeatured(); break;
+    case 'recipes': renderRecipes(); break;
+    case 'recipe-detail': if (state.selectedRecipe) renderRecipeDetail(state.selectedRecipe); break;
+    case 'pantry': renderPantry(); break;
+    case 'profile': renderProfile(); break;
+    case 'feedback': renderFeedback(); break;
+    case 'admin': renderAdmin(); break;
+    default: console.warn('No render handler for', route);
+  }
+}
+
+// ---------------------------
+// FETCH DATA
+// ---------------------------
 async function fetchRecipes() {
   try {
     const res = await fetch(`${API}/api/recipes`);
-    state.recipes = await res.json();
-    renderFeatured();
-    renderRecipes();
-    updateAdminStats();
-  } catch (err) {
-    console.error('Error fetching recipes:', err);
-  }
+    if (!res.ok) throw new Error('Failed to fetch recipes');
+    const data = await res.json();
+    state.recipes = data.map(r => ({ ...r, id: (r.id || (r.name || r.title || '').toLowerCase().replace(/ /g, '-')) }));
+    state.allRecipes = [...state.recipes];
+    console.log('Recipes loaded:', state.recipes.length);
+  } catch (err) { console.error('fetchRecipes error:', err); }
 }
 
-async function openRecipe(id) {
-  try {
-    const res = await fetch(`${API}/api/recipes/${id}`);
-    const r = await res.json();
-    state.selectedRecipe = r;
-    showView('recipe-detail');
-
-    const imgPath = `${API}/static/images/${r.img}`;
-    document.getElementById('recipeHeader').innerHTML = `
-      <div style="display:flex;gap:12px;align-items:center">
-        <div style="width:120px;height:80px;background-image:url(${imgPath});background-size:cover;border-radius:8px"></div>
-        <div>
-          <div style="font-weight:800">${r.title}</div>
-          <div class="muted">${r.cuisine} • ${r.time}m • ${r.difficulty}</div>
-        </div>
-      </div>`;
-
-    const ingDiv = document.getElementById('ingredientsList');
-    ingDiv.innerHTML = '';
-    r.ingredients.forEach(ing => {
-      const el = document.createElement('div');
-      el.className = 'row';
-      el.style.justifyContent = 'space-between';
-      el.innerHTML = `<div style="font-weight:600">${ing}</div>
-                      <div><button class="btn alt" data-ing="${ing}">Substitute</button></div>`;
-      ingDiv.appendChild(el);
-    });
-
-    const stepsDiv = document.getElementById('stepsList');
-    stepsDiv.innerHTML = '';
-    r.steps.forEach((s, idx) => {
-      const st = document.createElement('div');
-      st.className = 'step';
-      st.innerHTML = `<strong>Step ${idx+1}:</strong> ${s}`;
-      stepsDiv.appendChild(st);
-    });
-
-    renderSubsForRecipe(r);
-  } catch (err) {
-    console.error('Error opening recipe:', err);
-  }
-}
-
-/***** RENDER HELPERS *****/
+// ---------------------------
+// FEATURED + RECIPES
+// ---------------------------
 function renderFeatured() {
-  const grid = document.getElementById('featuredGrid');
-  grid.innerHTML = '';
-  state.recipes.slice(0,6).forEach(r => {
-    const imgPath = `${API}/static/images/${r.img}`;
-    const card = document.createElement('div');
-    card.className = 'recipe-card';
-    card.innerHTML = `<div class="recipe-pic" style="background-image:url(${imgPath})"></div>
-      <div class="recipe-body">
-        <strong>${r.title}</strong>
-        <div class="muted" style="font-size:12px">${r.cuisine} • ${r.time}m</div>
-      </div>`;
-    card.addEventListener('click', () => openRecipe(r.id));
-    grid.appendChild(card);
-  });
-}
-
-function renderRecipes(filter='') {
-  const grid = document.getElementById('recipesGrid');
-  if (!state.recipes) return;
-  grid.innerHTML = '';
-  const cuisine = document.getElementById('filterCuisine')?.value || '';
-  const difficulty = document.getElementById('filterDifficulty')?.value || '';
-  const q = filter.toLowerCase();
-
-  state.recipes.filter(r => {
-    if (cuisine && r.cuisine!==cuisine) return false;
-    if (difficulty && r.difficulty!==difficulty) return false;
-    if (q && !(r.title.toLowerCase().includes(q) || r.ingredients.join(' ').toLowerCase().includes(q))) return false;
-    return true;
-  }).forEach(r => {
-    const imgPath = `${API}/static/images/${r.img}`;
-    const card = document.createElement('div');
-    card.className = 'recipe-card';
-    card.innerHTML = `<div class="recipe-pic" style="background-image:url(${imgPath})"></div>
-      <div class="recipe-body">
-        <strong>${r.title}</strong>
-        <div class="muted" style="font-size:12px">${r.cuisine} • ${r.time}m</div>
-        <small class="muted">${r.ingredients.slice(0,3).join(', ')}${r.ingredients.length>3?'...':''}</small>
-      </div>`;
-    card.addEventListener('click', () => openRecipe(r.id));
-    grid.appendChild(card);
-  });
-}
-
-/***** PANTRY *****/
-async function fetchPantry() {
-  if (!state.currentUser) return;
-  const res = await fetch(`${API}/api/pantry?user=${state.currentUser}`);
-  state.pantry = await res.json();
-  renderPantry();
-}
-
-function renderPantry() {
-  const grid = document.getElementById('pantryGrid');
-  const quick = document.getElementById('quickPantry');
+  const grid = qs('#featuredGrid');
   if (!grid) return;
-  grid.innerHTML = '';
-  quick.innerHTML = '';
-  state.pantry.forEach(it => {
+  const featured = state.recipes.slice(0, 6);
+  grid.innerHTML = featured.map(r => `
+    <div class="recipe-card" data-id="${r.id}" style="cursor:pointer">
+      <div class="recipe-img" style="background-image:url('${getRecipeImageUrl(r)}')"></div>
+      <div class="recipe-info" style="padding:12px">
+        <div class="recipe-title">${escapeHtml(r.title || r.name)}</div>
+        <div class="recipe-meta"><small class="muted">${r.cuisine || 'Various'}</small> • <small class="muted">${r.time || '30'} mins</small></div>
+      </div>
+    </div>`).join('');
+}
+
+function renderRecipes() {
+  const grid = qs('#recipesGrid');
+  if (!grid) return;
+  grid.innerHTML = state.recipes.map(r => `
+    <div class="recipe-card" data-id="${r.id}" style="cursor:pointer">
+      <div class="recipe-img" style="background-image:url('${getRecipeImageUrl(r)}');height:160px"></div>
+      <div class="recipe-info" style="padding:12px">
+        <div class="recipe-title">${escapeHtml(r.title || r.name)}</div>
+        <div class="recipe-meta"><small class="muted">${r.cuisine || 'Various'}</small> • <small class="muted">${r.time || '30'} mins</small></div>
+      </div>
+    </div>`).join('');
+}
+
+// ---------------------------
+// RECIPE DETAIL
+// ---------------------------
+function renderRecipeDetail(recipe) {
+  if (!recipe) return;
+  state.selectedRecipe = recipe;
+
+  const recipesView = qs('#recipes');
+  const target = qs('#recipeDetailArea') || (() => {
     const el = document.createElement('div');
-    el.className = 'pantry-item';
-    el.innerHTML = `${it.name} <small style="margin-left:8px;color:#9ca3af">(${it.expiry}d)</small> <button class="btn alt" data-remove="${it._id}">x</button>`;
-    grid.appendChild(el);
+    el.id = 'recipeDetailArea';
+    recipesView.prepend(el);
+    return el;
+  })();
 
-    const q = document.createElement('div');
-    q.className = 'pantry-item';
-    q.innerText = it.name;
-    quick.appendChild(q);
+  const ingredientsHTML = (recipe.ingredients || []).map(i => `<li>${escapeHtml(typeof i === 'string' ? i : (i.name || ''))}</li>`).join('');
+  const stepsHTML = (recipe.steps || []).map((s, idx) => `<div class="step"><strong>Step ${idx+1}:</strong> ${escapeHtml(s)}</div>`).join('');
+  const altHTML = (recipe.alternatives || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
+
+  target.innerHTML = `
+    <div class="card">
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="width:240px;min-height:140px;background-image:url('${getRecipeImageUrl(recipe)}');background-size:cover;border-radius:10px"></div>
+        <div style="flex:1">
+          <h2>${escapeHtml(recipe.title || recipe.name)}</h2>
+          <div style="margin-bottom:8px;color:var(--muted)">${escapeHtml(recipe.cuisine || 'Various')} • ${escapeHtml(recipe.time || '30')} mins</div>
+          <div style="margin-top:10px">
+            <button id="favBtnDetail" class="btn">☆ Add to Favorites</button>
+            <button id="openRecipeBtn" class="btn alt">Open in Recipes</button>
+            <button id="speakRecipeBtn" class="btn">🔊 Speak</button>
+            <button id="stopRecipeBtn" class="btn alt">⏹ Stop Voice</button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:16px;display:grid;grid-template-columns:1fr 320px;gap:16px">
+        <div>
+          <h4>Ingredients</h4>
+          <ul id="ingredientsList">${ingredientsHTML}</ul>
+          <input id="substituteInput" placeholder="Add substitute" style="margin-top:4px"/>
+          <button id="addSubBtn" class="btn">Add</button>
+          <h4>Steps</h4>${stepsHTML}
+        </div>
+        <aside>
+          <h4>Alternatives</h4>
+          <ul id="alternativesList">${altHTML}</ul>
+        </aside>
+      </div>
+    </div>`;
+
+  on(qs('#favBtnDetail'), 'click', () => toggleFavorite(recipe.id));
+  on(qs('#openRecipeBtn'), 'click', () => navigateToRoute('recipes'));
+  on(qs('#speakRecipeBtn'), 'click', () => speakRecipe(recipe));
+  on(qs('#stopRecipeBtn'), 'click', stopVoice);
+  on(qs('#addSubBtn'), 'click', () => {
+    const val = qs('#substituteInput')?.value?.trim();
+    if (!val) return;
+    const li = document.createElement('li');
+    li.textContent = val;
+    qs('#alternativesList').appendChild(li);
+    qs('#substituteInput').value = '';
+    if (!recipe.alternatives) recipe.alternatives = [];
+    recipe.alternatives.push(val);
   });
+
+  speakRecipe(recipe);
 }
 
-async function addPantryItem(name, expiry) {
-  if (!state.currentUser) return;
-  await fetch(`${API}/api/pantry`, {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({user: state.currentUser, name, expiry})
-  });
-  fetchPantry();
+// ---------------------------
+// SPEECH
+// ---------------------------
+function speakRecipe(recipe) {
+  stopVoice();
+  if (!recipe || !recipe.steps) return;
+  const text = `Here's ${recipe.title || recipe.name}. ` + recipe.steps.join('. ');
+  speak(text);
 }
 
-async function removePantryItem(id) {
-  if (!state.currentUser) return;
-  await fetch(`${API}/api/pantry/${id}`, {method:'DELETE'});
-  fetchPantry();
+function speak(text) {
+  if (!window.speechSynthesis) return console.warn('No TTS available');
+  currentUtterance = new SpeechSynthesisUtterance(text);
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(currentUtterance);
 }
 
-document.getElementById('addPantryBtn')?.addEventListener('click', () => {
-  const name = document.getElementById('pantryInput').value.trim();
-  const expiry = parseInt(document.getElementById('pantryExpiry').value) || 7;
-  if (!name) return alert('Enter ingredient');
-  addPantryItem(name, expiry);
-  document.getElementById('pantryInput').value='';
-  document.getElementById('pantryExpiry').value='';
-});
-
-document.addEventListener('click', e => {
-  if (e.target.dataset.remove) removePantryItem(e.target.dataset.remove);
-});
-
-/***** FAVORITES *****/
-async function fetchFavorites() {
-  if (!state.currentUser) return;
-  const res = await fetch(`${API}/api/favorites?user=${state.currentUser}`);
-  state.favorites = await res.json();
-  renderFavorites();
-}
-
-async function addFavorite(recipeId) {
-  if (!state.currentUser) return;
-  await fetch(`${API}/api/favorites`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({user: state.currentUser, recipeId})
-  });
-  fetchFavorites();
-}
-
-document.getElementById('favBtn')?.addEventListener('click', () => {
-  if (!state.selectedRecipe) return;
-  addFavorite(state.selectedRecipe.id);
-  alert('Added to favorites');
-});
-
-function renderFavorites() {
-  const grid = document.getElementById('favoritesGrid');
-  if (!grid) return;
-  grid.innerHTML='';
-  state.favorites.forEach(r => {
-    const imgPath = `${API}/static/images/${r.img}`;
-    const card = document.createElement('div');
-    card.className='recipe-card';
-    card.innerHTML = `<div class="recipe-pic" style="background-image:url(${imgPath})"></div>
-                      <div class="recipe-body"><strong>${r.title}</strong></div>`;
-    card.addEventListener('click', () => openRecipe(r.id));
-    grid.appendChild(card);
-  });
-}
-
-/***** AUTH *****/
-let isLogin = true;
-const authForm = document.getElementById('authForm');
-authForm?.addEventListener('submit', e => {
-  e.preventDefault();
-  const email = document.getElementById('authEmail').value.trim();
-  const pass = document.getElementById('authPassword').value.trim();
-  if (!email || !pass) return alert('Enter email & password');
-  if (isLogin) login(email, pass);
-  else register(email, pass);
-});
-
-async function login(email, pass) {
-  const res = await fetch(`${API}/api/auth/login`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({email, pass})
-  });
-  const data = await res.json();
-  if (data.success) {
-    state.currentUser = data.user.email;
-    showView('profile');
-    fetchPantry();
-    fetchFavorites();
-  } else alert('Invalid credentials');
-}
-
-async function register(email, pass) {
-  const res = await fetch(`${API}/api/auth/register`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({email, pass})
-  });
-  const data = await res.json();
-  if (data.success) {
-    alert('Registered! Please login.');
-    toggleAuth.click();
-  } else alert('User exists');
-}
-
-/***** VOICE PLAYBACK FOR STEPS *****/
-let currentStepIndex = 0;
-let isPlayingSteps = false;
-
-document.getElementById('startVoicePlay')?.addEventListener('click', () => {
-  if (!state.selectedRecipe) return;
-  isPlayingSteps = true;
-  currentStepIndex = 0;
-  speakNextStep();
-});
-
-document.getElementById('stopVoicePlay')?.addEventListener('click', () => {
-  isPlayingSteps = false;
-  synthesis.cancel();
-});
-
-function speakNextStep() {
-  if (!isPlayingSteps || !state.selectedRecipe) return;
-  const steps = state.selectedRecipe.steps;
-  if (currentStepIndex < steps.length) {
-    const stepText = `Step ${currentStepIndex+1}: ${steps[currentStepIndex]}`;
-    const utter = new SpeechSynthesisUtterance(stepText);
-    utter.rate = parseFloat(document.getElementById('prefVoiceRate')?.value || 0.95);
-    utter.onend = () => {
-      currentStepIndex++;
-      if (isPlayingSteps && currentStepIndex<steps.length) setTimeout(speakNextStep, 1000);
-      else { speakText('Recipe steps completed. Enjoy!'); isPlayingSteps=false; }
-    };
-    synthesis.speak(utter);
+function stopVoice() {
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    currentUtterance = null;
   }
 }
 
-/***** ADMIN STATS *****/
-function updateAdminStats() {
-  document.getElementById('statRecipes').innerText = state.recipes.length || 0;
+// ---------------------------
+// PANTRY
+// ---------------------------
+async function renderPantry() {
+  const grid = qs('#pantryGrid');
+  if (!grid) return;
+  if (!state.currentUser) { grid.innerHTML = '<small class="muted">Login to manage your pantry</small>'; showAuthModal(); return; }
+
+  try {
+    const res = await fetch(`${API}/api/pantry?user=${encodeURIComponent(state.currentUser.email)}`);
+    const items = await res.json();
+    grid.innerHTML = items.length ? items.map(it => `
+      <div class="pantry-item" style="display:flex;align-items:center;gap:8px">
+        <span>${escapeHtml(it.name)}</span>
+        <small class="muted">${it.days_left ?? it.expiry} days</small>
+        <button class="pantry-delete" data-id="${it._id}" style="margin-left:auto">❌</button>
+      </div>`).join('') : '<small class="muted">No items in pantry</small>';
+  } catch (err) { console.error(err); grid.innerHTML = '<small class="muted">Failed to load pantry</small>'; }
 }
 
-/***** SUBSTITUTIONS *****/
-function renderSubsForRecipe(r) {
-  const list = document.getElementById('subsList');
-  if (!list) return;
-  list.innerHTML='';
-  r.ingredients.slice(0,5).forEach(ing=>{
-    const row = document.createElement('div');
-    row.className='sub-row';
-    row.innerHTML=`<div>${ing}</div><button class="btn alt" onclick="findSubFor('${ing}')">Find Substitute</button>`;
-    list.appendChild(row);
+async function addPantryItem(name, expiry = 7) {
+  if (!state.currentUser) { state.pendingRoute = 'pantry'; showAuthModal(); return; }
+  try {
+    await fetch(`${API}/api/pantry?user=${encodeURIComponent(state.currentUser.email)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expiry })
+    });
+    renderPantry();
+  } catch (err) { console.error(err); alert('Failed to add pantry item'); }
+}
+
+async function deletePantryItem(id) {
+  if (!state.currentUser) { state.pendingRoute = 'pantry'; showAuthModal(); return; }
+  try {
+    await fetch(`${API}/api/pantry/${id}?user=${encodeURIComponent(state.currentUser.email)}`, { method: 'DELETE' });
+    renderPantry();
+  } catch (err) { console.error(err); alert('Failed to delete pantry item'); }
+}
+
+// ---------------------------
+// FAVORITES
+// ---------------------------
+async function toggleFavorite(recipeId) {
+  if (!state.currentUser) { state.pendingRoute = 'profile'; showAuthModal(); return; }
+  try {
+    await fetch(`${API}/api/favorites?user=${encodeURIComponent(state.currentUser.email)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipeId })
+    });
+    alert('Added to favorites');
+  } catch (err) { console.error(err); alert('Failed to add favorite'); }
+}
+
+// ---------------------------
+// AUTH
+// ---------------------------
+function setupAuth() {
+  const userStr = localStorage.getItem('cookmateUser');
+  if (userStr) state.currentUser = JSON.parse(userStr);
+}
+
+function showAuthModal() {
+  const modal = qs('#loginModal'); 
+  if (!modal) { alert('Login required'); return; }
+  modal.style.display = 'block';
+}
+
+// Call after successful login
+function loginSuccess(user) {
+  state.currentUser = user;
+  localStorage.setItem('cookmateUser', JSON.stringify(user));
+  const modal = qs('#loginModal');
+  if (modal) modal.style.display = 'none';
+
+  if (state.pendingRoute) {
+    const pending = state.pendingRoute;
+    state.pendingRoute = null;
+    navigateToRoute(pending);
+  }
+}
+
+function setupLogoutBinding() {
+  on(qs('#logoutBtn'), 'click', () => {
+    state.currentUser = null;
+    localStorage.removeItem('cookmateUser');
+    alert('Logged out');
+    navigateToRoute('home');
   });
 }
 
-function findSubFor(ingredient) {
-  document.getElementById('subQuery').value = ingredient;
-  showView('subs');
-  document.getElementById('findSubs')?.click();
+// ---------------------------
+// VOICE SEARCH
+// ---------------------------
+function setupVoiceRecognition() {
+  // Optional later
 }
 
-document.getElementById('findSubs')?.addEventListener('click', ()=>{
-  const query = document.getElementById('subQuery').value.trim();
-  if (!query) return alert('Enter ingredient');
-  const subs = {
-    'buttermilk':['Yogurt+water','Milk+lemon juice','Sour cream'],
-    'butter':['Ghee','Coconut oil','Olive oil'],
-    'egg':['Flax egg','Banana','Applesauce'],
-    'milk':['Almond milk','Coconut milk','Soy milk'],
-    'tomato':['Tomato paste+water','Red bell pepper','Canned tomatoes']
-  };
-  const results = subs[query.toLowerCase()] || ['No substitutions found.'];
-  const div = document.getElementById('subResults');
-  div.innerHTML='<h4>Suggested Substitutes:</h4>';
-  results.forEach(sub=>{
-    const row = document.createElement('div');
-    row.className='sub-row';
-    row.innerText=sub;
-    div.appendChild(row);
+// ---------------------------
+// SEARCH
+// ---------------------------
+function setupSearch() {
+  const searchInput = qs('#searchInput');
+  if (!searchInput) return;
+  on(searchInput, 'input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    state.recipes = state.allRecipes.filter(r => (r.name || r.title || '').toLowerCase().includes(q));
+    renderRecipes();
   });
-});
-
-/***** PREFERENCES *****/
-document.getElementById('savePrefs')?.addEventListener('click', () => {
-  state.prefs.diet = document.getElementById('prefDiet')?.value;
-  state.prefs.voiceRate = document.getElementById('prefVoiceRate')?.value;
-  alert('Preferences saved!');
-});
-
-/***** FILTERS & SEARCH *****/
-document.getElementById('searchQuery')?.addEventListener('input', e=>renderRecipes(e.target.value));
-document.getElementById('filterCuisine')?.addEventListener('change', ()=>renderRecipes());
-document.getElementById('filterDifficulty')?.addEventListener('change', ()=>renderRecipes());
-document.getElementById('globalSearch')?.addEventListener('input', e=>{
-  showView('recipes');
-  renderRecipes(e.target.value.toLowerCase());
-});
-
-/***** FEEDBACK *****/
-document.getElementById('submitFb')?.addEventListener('click', ()=>{
-  alert('Thank you for your feedback!');
-  ['fbSpice','fbSalt','fbSweet','fbTaste','fbImprove'].forEach(id=>document.getElementById(id).value='');
-});
-
-/***** INIT *****/
-fetchRecipes();
-if (state.currentUser) { fetchPantry(); fetchFavorites(); }
-showView('home');
+}
